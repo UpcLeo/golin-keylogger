@@ -1,0 +1,18 @@
+# Compiled binaries
+*.exe
+c2server
+golin
+
+# 构建产物(由 build.bat 经 gen_resources.go 重新生成)
+*.syso
+
+# Go test binaries
+*.test
+*.out
+
+# IDE
+.idea/
+
+# OS files
+Thumbs.db
+.DS_Store
